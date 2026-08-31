@@ -46,7 +46,7 @@ ShellRoot {
       layout: {
         left: [{ id: "omarchy.menu" }, { id: "omarchy.workspaces" }],
         center: [{ id: "omarchy.clock", format: "dddd HH:mm" }],
-        right: [{ id: "omarchy.audio" }]
+        right: []
       }
     },
     plugins: []
