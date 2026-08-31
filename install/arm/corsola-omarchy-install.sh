@@ -66,7 +66,6 @@ cat > "$HOME/.config/hypr/autostart.lua" <<'EOF'
 -- Corsola uses Omarchy's upstream shell/config with ARM-safe startup.
 o.exec_on_start("systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP HYPRLAND_INSTANCE_SIGNATURE")
 o.exec_on_start("dbus-update-activation-environment --systemd --all")
-o.exec_on_start("swaybg -i $HOME/.local/state/omarchy/current/background -m fill")
 o.exec_on_start("swaync")
 o.exec_on_start("nm-applet --indicator")
 o.exec_on_start("hypridle")
@@ -74,6 +73,42 @@ o.exec_on_start("OMARCHY_PATH=/usr/share/omarchy omarchy-launch-shell")
 o.exec_on_start("OMARCHY_PATH=/usr/share/omarchy omarchy-provision-first-run")
 o.exec_on_start("OMARCHY_PATH=/usr/share/omarchy omarchy-powerprofiles-init")
 EOF
+
+# The MT8186 codec is exposed by ALSA but WirePlumber initially selects its
+# `off` profile on Corsola. Quickshell owns wallpapers, so do not start a
+# second swaybg process here; it races theme symlink updates.
+mkdir -p "$HOME/.config/systemd/user"
+cat > "$HOME/.local/bin/corsola-audio-init" <<'EOF'
+#!/bin/sh
+set -eu
+for _ in $(seq 1 30); do
+  card=$(pactl list short cards 2>/dev/null | awk '/platform-sound/{print $2; exit}') || true
+  if [ -n "${card:-}" ]; then
+    pactl set-card-profile "$card" pro-audio
+    pactl set-default-sink alsa_output.platform-sound.pro-output-25
+    exit 0
+  fi
+  sleep 1
+done
+exit 1
+EOF
+chmod +x "$HOME/.local/bin/corsola-audio-init"
+cat > "$HOME/.config/systemd/user/corsola-audio.service" <<'EOF'
+[Unit]
+Description=Select Corsola built-in audio output
+After=pipewire-pulse.service wireplumber.service
+Wants=pipewire-pulse.service wireplumber.service
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/corsola-audio-init
+RemainAfterExit=yes
+
+[Install]
+WantedBy=default.target
+EOF
+systemctl --user daemon-reload
+systemctl --user enable corsola-audio.service
 
 export OMARCHY_PATH=/usr/share/omarchy
 export PATH=/usr/local/bin:$HOME/.local/bin:/usr/bin
