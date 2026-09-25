@@ -28,6 +28,10 @@ cat >"$stub_bin/omarchy-pkg-add" <<'SH'
 #!/bin/bash
 printf 'omarchy-pkg-add\t%s\n' "$*" >>"$TEST_LOG"
 SH
+cat >"$stub_bin/omarchy-pkg-aur-add" <<'SH'
+#!/bin/bash
+printf 'omarchy-pkg-aur-add\t%s\n' "$*" >>"$TEST_LOG"
+SH
 cat >"$stub_bin/modprobe" <<'SH'
 #!/bin/bash
 printf 'modprobe\t%s\n' "$*" >>"$TEST_LOG"
@@ -54,8 +58,10 @@ pass "non-camera Broadcom hardware is left alone"
 run_leaf '02:00.0 Multimedia controller [0480]: Broadcom 720p FaceTime HD Camera [14e4:1570]' >/dev/null
 [[ -f "$modules/facetimehd.conf" ]] || fail "the FaceTime HD module is enabled at boot"
 grep -Fxq facetimehd "$modules/facetimehd.conf" || fail "the module-load entry names facetimehd"
-grep -Fq $'omarchy-pkg-add\tfacetimehd-dkms linux-headers' "$calls" ||
-  fail "the driver and kernel headers are installed" "$(cat "$calls")"
+grep -Fq $'omarchy-pkg-aur-add\tfacetimehd-dkms' "$calls" ||
+  fail "the AUR driver package is installed" "$(cat "$calls")"
+grep -Fq $'omarchy-pkg-add\tlinux-headers' "$calls" ||
+  fail "the kernel headers are installed" "$(cat "$calls")"
 grep -Fq $'modprobe\t-r bdc_pci' "$calls" || fail "the conflicting bdc_pci driver is unloaded"
 grep -Fq $'modprobe\tfacetimehd' "$calls" || fail "the camera driver is loaded immediately"
 pass "Broadcom 1570 installs firmware, DKMS, and module loading"
