@@ -32,6 +32,10 @@ cat >"$stub_bin/modprobe" <<'SH'
 #!/bin/bash
 printf 'modprobe\t%s\n' "$*" >>"$TEST_LOG"
 SH
+cat >"$stub_bin/sudo" <<'SH'
+#!/bin/bash
+exec "$@"
+SH
 chmod +x "$stub_bin"/*
 
 run_leaf() {
