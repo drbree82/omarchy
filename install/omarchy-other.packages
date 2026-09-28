@@ -64,6 +64,10 @@ dell-xps13-sidecar-amps
 # Speaker tunings (LV2 limiter every tuning ends in)
 lsp-plugins-lv2
 
+# FaceTime HD camera support
+facetimehd-dkms
+facetimehd-firmware
+
 # T2 MacBook support packages
 apple-bcm-firmware
 apple-t2-audio-config

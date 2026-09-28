@@ -18,8 +18,7 @@ run_as_root() {
 
 if grep -q '14e4:1570' <<<"$pci_info"; then
   echo "Broadcom 1570 FaceTime HD camera detected"
-  omarchy-pkg-aur-add facetimehd-dkms
-  omarchy-pkg-add linux-headers
+  omarchy-pkg-add facetimehd-dkms facetimehd-firmware
 
   modules_dir="${OMARCHY_FACETIMEHD_MODULES_DIR:-/etc/modules-load.d}"
   run_as_root install -d "$modules_dir"

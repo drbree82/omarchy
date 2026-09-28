@@ -4,8 +4,10 @@ set -euo pipefail
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/base-test.sh"
 
-leaf="$ROOT/install/hardware/apple/fix-facetimehd.sh"
+camera_installer="$ROOT/install/hardware/apple/fix-facetimehd.sh"
 all="$ROOT/install/hardware/all.sh"
+offline_packages="$ROOT/install/omarchy-other.packages"
+migration="$ROOT/migrations/1790297558.sh"
 
  grep -Fq 'apple/fix-facetimehd.sh' "$all" ||
   fail "the FaceTime HD fix runs during hardware setup"
@@ -47,7 +49,7 @@ run_leaf() {
   TEST_LOG="$calls" \
   OMARCHY_FACETIMEHD_MODULES_DIR="$modules" \
   PATH="$stub_bin:$PATH" \
-  bash -euo pipefail "$leaf"
+  bash -euo pipefail "$camera_installer"
 }
 
 run_leaf '03:00.0 Network controller [0280]: Broadcom [14e4:43a0]' >/dev/null
@@ -58,10 +60,18 @@ pass "non-camera Broadcom hardware is left alone"
 run_leaf '02:00.0 Multimedia controller [0480]: Broadcom 720p FaceTime HD Camera [14e4:1570]' >/dev/null
 [[ -f "$modules/facetimehd.conf" ]] || fail "the FaceTime HD module is enabled at boot"
 grep -Fxq facetimehd "$modules/facetimehd.conf" || fail "the module-load entry names facetimehd"
-grep -Fq $'omarchy-pkg-aur-add\tfacetimehd-dkms' "$calls" ||
-  fail "the AUR driver package is installed" "$(cat "$calls")"
-grep -Fq $'omarchy-pkg-add\tlinux-headers' "$calls" ||
-  fail "the kernel headers are installed" "$(cat "$calls")"
+grep -Fq $'omarchy-pkg-add\tfacetimehd-dkms facetimehd-firmware' "$calls" ||
+  fail "the driver and firmware packages are installed" "$(cat "$calls")"
 grep -Fq $'modprobe\t-r bdc_pci' "$calls" || fail "the conflicting bdc_pci driver is unloaded"
 grep -Fq $'modprobe\tfacetimehd' "$calls" || fail "the camera driver is loaded immediately"
 pass "Broadcom 1570 installs firmware, DKMS, and module loading"
+
+grep -Fxq facetimehd-dkms "$offline_packages" || fail "the offline package set includes facetimehd-dkms"
+grep -Fxq facetimehd-firmware "$offline_packages" || fail "the offline package set includes facetimehd-firmware"
+pass "the offline package set includes FaceTime HD packages"
+
+grep -Fq 'omarchy-pkg-add facetimehd-dkms facetimehd-firmware' "$migration" ||
+  fail "the existing-install migration installs the packaged driver and firmware"
+grep -Fq 'omarchy-state set reboot-required' "$migration" ||
+  fail "the existing-install migration requests a reboot"
+pass "existing installations have a guarded FaceTime HD migration"
