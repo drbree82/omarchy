@@ -20,10 +20,10 @@ omarchy-pkg-add facetimehd-dkms facetimehd-firmware
 printf '%s\n' facetimehd | sudo tee "$modules_conf" >/dev/null
 printf '%s\n' 'blacklist bdc_pci' | sudo tee "$modprobe_conf" >/dev/null
 sudo limine-mkinitcpio
-if lsmod | awk '$1 == "bdc_pci" { found = 1 } END { exit !found }'; then
-  sudo modprobe -r bdc_pci
-fi
-sudo modprobe facetimehd 2>/dev/null ||
+if lsmod | awk '$1 == "bdc_pci" { found = 1 } END { exit !found }' && ! sudo modprobe -r bdc_pci; then
+  echo "Could not unload bdc_pci now; facetimehd is configured to load after reboot." >&2
+elif ! sudo modprobe facetimehd 2>/dev/null; then
   echo "Could not load facetimehd now; it is configured to load after reboot." >&2
+fi
 omarchy-state set reboot-required
 sudo install -Dm644 /dev/null "$marker"

@@ -38,6 +38,9 @@ SH
 cat >"$stub_bin/modprobe" <<'SH'
 #!/bin/bash
 printf 'modprobe\t%s\n' "$*" >>"$TEST_LOG"
+if [[ $1 == -r && $2 == bdc_pci && ${TEST_FAIL_BDC_UNLOAD:-0} == 1 ]]; then
+  exit 1
+fi
 if [[ $1 == facetimehd && ${TEST_FAIL_FACETIMEHD_MODPROBE:-0} == 1 ]]; then
   exit 1
 fi
@@ -134,7 +137,7 @@ run_migration() {
   OMARCHY_FACETIMEHD_MODULES_CONF="$migration_modules" \
   OMARCHY_FACETIMEHD_MODPROBE_CONF="$migration_modprobe_conf" \
   OMARCHY_FACETIMEHD_MIGRATION_MARKER="$migration_marker" \
-  TEST_FAIL_FACETIMEHD_MODPROBE=1 \
+  TEST_FAIL_BDC_UNLOAD=1 \
   PATH="$stub_bin:$PATH" \
   bash -euo pipefail "$migration"
 }
@@ -151,16 +154,15 @@ grep -Fxq facetimehd "$migration_modules" || fail "the migration enables facetim
 [[ -f "$migration_modprobe_conf" ]] || fail "the migration blacklists the competing driver"
 grep -Fxq 'blacklist bdc_pci' "$migration_modprobe_conf" ||
   fail "the migration blacklist names bdc_pci"
-grep -Fq $'modprobe\t-r bdc_pci' "$calls" || fail "the retry releases the camera from bdc_pci"
-grep -Fq $'modprobe\tfacetimehd' "$calls" || fail "the retry attempts to load the camera driver"
-release_line=$(grep -nFx $'modprobe\t-r bdc_pci' "$calls" | cut -d: -f1)
-load_line=$(grep -nFx $'modprobe\tfacetimehd' "$calls" | cut -d: -f1)
-(( release_line < load_line )) || fail "the conflicting driver is released before facetimehd is loaded"
-[[ $migration_output == *"Could not load facetimehd now; it is configured to load after reboot."* ]] ||
-  fail "a failed immediate module load explains that activation is deferred until reboot" "$migration_output"
+grep -Fq $'modprobe\t-r bdc_pci' "$calls" || fail "the retry attempts to release the camera from bdc_pci"
+! grep -Fxq $'modprobe\tfacetimehd' "$calls" ||
+  fail "facetimehd is not loaded while bdc_pci remains bound"
+[[ $migration_output == *"Could not unload bdc_pci now; facetimehd is configured to load after reboot."* ]] ||
+  fail "a failed unload clearly defers activation until reboot" "$migration_output"
 grep -Fq $'omarchy-state\tset reboot-required' "$calls" ||
-  fail "the successful retry requests a reboot"
-pass "the migration completes driver setup after the successful rebuild"
+  fail "the migration requests a reboot after a failed unload"
+[[ -f $migration_marker ]] || fail "a failed live unload does not leave migration incomplete"
+pass "the migration completes and defers driver activation when bdc_pci cannot unload"
 
 : >"$calls"
 run_migration || fail "the completed migration remains successful"
