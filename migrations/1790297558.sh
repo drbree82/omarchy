@@ -18,7 +18,7 @@ omarchy-pkg-add facetimehd-dkms facetimehd-firmware
 
 printf '%s\n' facetimehd | sudo tee "$modules_conf" >/dev/null
 sudo limine-mkinitcpio
-sudo modprobe -r bdc_pci 2>/dev/null || true
-sudo modprobe facetimehd 2>/dev/null || true
+sudo modprobe facetimehd 2>/dev/null ||
+  echo "Could not load facetimehd now; it is configured to load after reboot." >&2
 omarchy-state set reboot-required
 sudo install -Dm644 /dev/null "$marker"

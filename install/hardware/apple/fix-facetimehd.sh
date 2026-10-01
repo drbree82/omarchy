@@ -24,9 +24,7 @@ if grep -q '14e4:1570' <<<"$pci_info"; then
   run_as_root install -d "$modules_dir"
   printf '%s\n' facetimehd | run_as_root tee "$modules_dir/facetimehd.conf" >/dev/null
 
-  # The generic bdc_pci driver can claim this PCI function before facetimehd.
-  # facetimehd's DKMS package blacklists it for future boots; unload it here as
-  # well so an already-running install can use the camera without rebooting.
-  run_as_root modprobe -r bdc_pci 2>/dev/null || true
-  run_as_root modprobe facetimehd 2>/dev/null || true
+  # Hardware setup runs inside the target root from the ISO chroot. Loading the
+  # module here would target the live installer kernel; the target system loads
+  # it through modules-load.d on its first boot.
 fi

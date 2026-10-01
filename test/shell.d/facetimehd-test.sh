@@ -37,6 +37,9 @@ SH
 cat >"$stub_bin/modprobe" <<'SH'
 #!/bin/bash
 printf 'modprobe\t%s\n' "$*" >>"$TEST_LOG"
+if [[ $1 == facetimehd && ${TEST_FAIL_FACETIMEHD_MODPROBE:-0} == 1 ]]; then
+  exit 1
+fi
 SH
 cat >"$stub_bin/sudo" <<'SH'
 #!/bin/bash
@@ -62,9 +65,9 @@ run_leaf '02:00.0 Multimedia controller [0480]: Broadcom 720p FaceTime HD Camera
 grep -Fxq facetimehd "$modules/facetimehd.conf" || fail "the module-load entry names facetimehd"
 grep -Fq $'omarchy-pkg-add\tfacetimehd-dkms facetimehd-firmware' "$calls" ||
   fail "the driver and firmware packages are installed" "$(cat "$calls")"
-grep -Fq $'modprobe\t-r bdc_pci' "$calls" || fail "the conflicting bdc_pci driver is unloaded"
-grep -Fq $'modprobe\tfacetimehd' "$calls" || fail "the camera driver is loaded immediately"
-pass "Broadcom 1570 installs firmware, DKMS, and module loading"
+! grep -q '^modprobe' "$calls" ||
+  fail "fresh install hardware setup does not load a driver into the live ISO kernel"
+pass "Broadcom 1570 installs firmware and configures module loading for the target boot"
 
 grep -Fxq facetimehd-dkms "$offline_packages" || fail "the offline package set includes facetimehd-dkms"
 grep -Fxq facetimehd-firmware "$offline_packages" || fail "the offline package set includes facetimehd-firmware"
@@ -119,6 +122,7 @@ run_migration() {
   TEST_REBUILD_ATTEMPTS="$rebuild_attempts" \
   OMARCHY_FACETIMEHD_MODULES_CONF="$migration_modules" \
   OMARCHY_FACETIMEHD_MIGRATION_MARKER="$migration_marker" \
+  TEST_FAIL_FACETIMEHD_MODPROBE=1 \
   PATH="$stub_bin:$PATH" \
   bash -euo pipefail "$migration"
 }
@@ -129,11 +133,12 @@ run_migration && fail "a failed initramfs rebuild fails the first migration run"
   fail "a failed rebuild does not mark reboot-required"
 pass "a failed initramfs rebuild leaves the migration retryable"
 
-run_migration || fail "the migration retries and succeeds after a failed rebuild"
+migration_output=$(run_migration 2>&1) || fail "the migration retries and succeeds after a failed rebuild" "$migration_output"
 [[ $(<"$rebuild_attempts") == 2 ]] || fail "the retry performs a second initramfs rebuild"
 grep -Fxq facetimehd "$migration_modules" || fail "the migration enables facetimehd at boot"
-grep -Fq $'modprobe\t-r bdc_pci' "$calls" || fail "the retry unloads the conflicting driver"
-grep -Fq $'modprobe\tfacetimehd' "$calls" || fail "the retry loads the camera driver"
+grep -Fq $'modprobe\tfacetimehd' "$calls" || fail "the retry attempts to load the camera driver"
+[[ $migration_output == *"Could not load facetimehd now; it is configured to load after reboot."* ]] ||
+  fail "a failed immediate module load explains that activation is deferred until reboot" "$migration_output"
 grep -Fq $'omarchy-state\tset reboot-required' "$calls" ||
   fail "the successful retry requests a reboot"
 pass "the migration completes driver setup after the successful rebuild"
