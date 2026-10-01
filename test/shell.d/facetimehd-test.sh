@@ -19,6 +19,7 @@ trap 'rm -rf "$test_tmp"' EXIT
 stub_bin="$test_tmp/bin"
 calls="$test_tmp/calls.log"
 modules="$test_tmp/modules-load.d"
+modprobe_conf_dir="$test_tmp/modprobe.d"
 mkdir -p "$stub_bin"
 : >"$calls"
 
@@ -51,18 +52,23 @@ run_leaf() {
   LSPCI_OUTPUT="$1" \
   TEST_LOG="$calls" \
   OMARCHY_FACETIMEHD_MODULES_DIR="$modules" \
+  OMARCHY_FACETIMEHD_MODPROBE_DIR="$modprobe_conf_dir" \
   PATH="$stub_bin:$PATH" \
   bash -euo pipefail "$camera_installer"
 }
 
 run_leaf '03:00.0 Network controller [0280]: Broadcom [14e4:43a0]' >/dev/null
-[[ ! -e "$modules/facetimehd.conf" ]] || fail "non-camera Broadcom hardware is left alone"
+[[ ! -e "$modules/facetimehd.conf" && ! -e "$modprobe_conf_dir/facetimehd.conf" ]] ||
+  fail "non-camera Broadcom hardware is left alone"
 [[ ! -s "$calls" ]] || fail "non-camera hardware does not install camera support"
 pass "non-camera Broadcom hardware is left alone"
 
 run_leaf '02:00.0 Multimedia controller [0480]: Broadcom 720p FaceTime HD Camera [14e4:1570]' >/dev/null
 [[ -f "$modules/facetimehd.conf" ]] || fail "the FaceTime HD module is enabled at boot"
 grep -Fxq facetimehd "$modules/facetimehd.conf" || fail "the module-load entry names facetimehd"
+[[ -f "$modprobe_conf_dir/facetimehd.conf" ]] || fail "the competing bdc_pci module is blacklisted"
+grep -Fxq 'blacklist bdc_pci' "$modprobe_conf_dir/facetimehd.conf" ||
+  fail "the modprobe blacklist names bdc_pci"
 grep -Fq $'omarchy-pkg-add\tfacetimehd-dkms facetimehd-firmware' "$calls" ||
   fail "the driver and firmware packages are installed" "$(cat "$calls")"
 ! grep -q '^modprobe' "$calls" ||
@@ -78,6 +84,10 @@ grep -Fq 'omarchy-pkg-add facetimehd-dkms facetimehd-firmware' "$migration" ||
 grep -Fq 'omarchy-state set reboot-required' "$migration" ||
   fail "the existing-install migration requests a reboot"
 
+cat >"$stub_bin/lsmod" <<'SH'
+#!/bin/bash
+printf 'Module Size Used by\nbdc_pci 16384 0\n'
+SH
 cat >"$stub_bin/omarchy-pkg-present" <<'SH'
 #!/bin/bash
 [[ -f $TEST_INSTALLED_MARKER ]]
@@ -102,7 +112,7 @@ SH
 cat >"$stub_bin/sudo" <<'SH'
 #!/bin/bash
 if [[ $1 == tee ]]; then
-  cat >"$TEST_MODULES_CONF"
+  cat >"${@: -1}"
 else
   "$@"
 fi
@@ -110,6 +120,7 @@ SH
 chmod +x "$stub_bin"/*
 
 migration_modules="$test_tmp/facetimehd.conf"
+migration_modprobe_conf="$test_tmp/facetimehd-modprobe.conf"
 installed_marker="$test_tmp/packages-installed"
 migration_marker="$test_tmp/migration-complete"
 rebuild_attempts="$test_tmp/rebuild-attempts"
@@ -121,6 +132,7 @@ run_migration() {
   TEST_MODULES_CONF="$migration_modules" \
   TEST_REBUILD_ATTEMPTS="$rebuild_attempts" \
   OMARCHY_FACETIMEHD_MODULES_CONF="$migration_modules" \
+  OMARCHY_FACETIMEHD_MODPROBE_CONF="$migration_modprobe_conf" \
   OMARCHY_FACETIMEHD_MIGRATION_MARKER="$migration_marker" \
   TEST_FAIL_FACETIMEHD_MODPROBE=1 \
   PATH="$stub_bin:$PATH" \
@@ -136,7 +148,14 @@ pass "a failed initramfs rebuild leaves the migration retryable"
 migration_output=$(run_migration 2>&1) || fail "the migration retries and succeeds after a failed rebuild" "$migration_output"
 [[ $(<"$rebuild_attempts") == 2 ]] || fail "the retry performs a second initramfs rebuild"
 grep -Fxq facetimehd "$migration_modules" || fail "the migration enables facetimehd at boot"
+[[ -f "$migration_modprobe_conf" ]] || fail "the migration blacklists the competing driver"
+grep -Fxq 'blacklist bdc_pci' "$migration_modprobe_conf" ||
+  fail "the migration blacklist names bdc_pci"
+grep -Fq $'modprobe\t-r bdc_pci' "$calls" || fail "the retry releases the camera from bdc_pci"
 grep -Fq $'modprobe\tfacetimehd' "$calls" || fail "the retry attempts to load the camera driver"
+release_line=$(grep -nFx $'modprobe\t-r bdc_pci' "$calls" | cut -d: -f1)
+load_line=$(grep -nFx $'modprobe\tfacetimehd' "$calls" | cut -d: -f1)
+(( release_line < load_line )) || fail "the conflicting driver is released before facetimehd is loaded"
 [[ $migration_output == *"Could not load facetimehd now; it is configured to load after reboot."* ]] ||
   fail "a failed immediate module load explains that activation is deferred until reboot" "$migration_output"
 grep -Fq $'omarchy-state\tset reboot-required' "$calls" ||

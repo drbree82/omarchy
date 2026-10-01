@@ -21,8 +21,10 @@ if grep -q '14e4:1570' <<<"$pci_info"; then
   omarchy-pkg-add facetimehd-dkms facetimehd-firmware
 
   modules_dir="${OMARCHY_FACETIMEHD_MODULES_DIR:-/etc/modules-load.d}"
-  run_as_root install -d "$modules_dir"
+  modprobe_dir="${OMARCHY_FACETIMEHD_MODPROBE_DIR:-/etc/modprobe.d}"
+  run_as_root install -d "$modules_dir" "$modprobe_dir"
   printf '%s\n' facetimehd | run_as_root tee "$modules_dir/facetimehd.conf" >/dev/null
+  printf '%s\n' 'blacklist bdc_pci' | run_as_root tee "$modprobe_dir/facetimehd.conf" >/dev/null
 
   # Hardware setup runs inside the target root from the ISO chroot. Loading the
   # module here would target the live installer kernel; the target system loads

@@ -7,6 +7,7 @@ fi
 
 marker="${OMARCHY_FACETIMEHD_MIGRATION_MARKER:-/var/lib/omarchy/migrations/1790297558}"
 modules_conf="${OMARCHY_FACETIMEHD_MODULES_CONF:-/etc/modules-load.d/facetimehd.conf}"
+modprobe_conf="${OMARCHY_FACETIMEHD_MODPROBE_CONF:-/etc/modprobe.d/facetimehd.conf}"
 
 # This repair is machine-wide while migration completion is per-user. Only a
 # marker written after the rebuild succeeds prevents another user repeating it.
@@ -17,7 +18,11 @@ echo "Installing FaceTime HD camera support"
 omarchy-pkg-add facetimehd-dkms facetimehd-firmware
 
 printf '%s\n' facetimehd | sudo tee "$modules_conf" >/dev/null
+printf '%s\n' 'blacklist bdc_pci' | sudo tee "$modprobe_conf" >/dev/null
 sudo limine-mkinitcpio
+if lsmod | awk '$1 == "bdc_pci" { found = 1 } END { exit !found }'; then
+  sudo modprobe -r bdc_pci
+fi
 sudo modprobe facetimehd 2>/dev/null ||
   echo "Could not load facetimehd now; it is configured to load after reboot." >&2
 omarchy-state set reboot-required
