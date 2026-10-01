@@ -106,7 +106,9 @@ printf 'limine-mkinitcpio\n' >>"$TEST_LOG"
 attempts=$(<"$TEST_REBUILD_ATTEMPTS")
 attempts=$((attempts + 1))
 printf '%s\n' "$attempts" >"$TEST_REBUILD_ATTEMPTS"
-(( attempts > 1 ))
+if (( attempts == 1 )) && [[ ${TEST_FAIL_REBUILD:-0} == 1 ]]; then
+  exit 1
+fi
 SH
 cat >"$stub_bin/omarchy-state" <<'SH'
 #!/bin/bash
@@ -129,26 +131,35 @@ migration_marker="$test_tmp/migration-complete"
 rebuild_attempts="$test_tmp/rebuild-attempts"
 printf '0\n' >"$rebuild_attempts"
 run_migration() {
+  local marker=${1:-$migration_marker}
+  local attempts=${2:-$rebuild_attempts}
+  local fail_bdc_unload=${3:-0}
+  local fail_facetimehd_load=${4:-0}
+  local fail_rebuild=${5:-0}
+
   LSPCI_OUTPUT='02:00.0 Multimedia controller [0480]: Broadcom FaceTime HD Camera [14e4:1570]' \
   TEST_LOG="$calls" \
   TEST_INSTALLED_MARKER="$installed_marker" \
   TEST_MODULES_CONF="$migration_modules" \
-  TEST_REBUILD_ATTEMPTS="$rebuild_attempts" \
+  TEST_REBUILD_ATTEMPTS="$attempts" \
   OMARCHY_FACETIMEHD_MODULES_CONF="$migration_modules" \
   OMARCHY_FACETIMEHD_MODPROBE_CONF="$migration_modprobe_conf" \
-  OMARCHY_FACETIMEHD_MIGRATION_MARKER="$migration_marker" \
-  TEST_FAIL_BDC_UNLOAD=1 \
+  OMARCHY_FACETIMEHD_MIGRATION_MARKER="$marker" \
+  TEST_FAIL_BDC_UNLOAD="$fail_bdc_unload" \
+  TEST_FAIL_FACETIMEHD_MODPROBE="$fail_facetimehd_load" \
+  TEST_FAIL_REBUILD="$fail_rebuild" \
   PATH="$stub_bin:$PATH" \
   bash -euo pipefail "$migration"
 }
 
-run_migration && fail "a failed initramfs rebuild fails the first migration run"
+run_migration "$migration_marker" "$rebuild_attempts" 0 0 1 &&
+  fail "a failed initramfs rebuild fails the first migration run"
 [[ $(<"$rebuild_attempts") == 1 ]] || fail "the first migration run attempts one initramfs rebuild"
 ! grep -q 'omarchy-state.*reboot-required' "$calls" ||
   fail "a failed rebuild does not mark reboot-required"
 pass "a failed initramfs rebuild leaves the migration retryable"
 
-migration_output=$(run_migration 2>&1) || fail "the migration retries and succeeds after a failed rebuild" "$migration_output"
+migration_output=$(run_migration "$migration_marker" "$rebuild_attempts" 1 0 0 2>&1) || fail "the migration retries and succeeds after a failed rebuild" "$migration_output"
 [[ $(<"$rebuild_attempts") == 2 ]] || fail "the retry performs a second initramfs rebuild"
 grep -Fxq facetimehd "$migration_modules" || fail "the migration enables facetimehd at boot"
 [[ -f "$migration_modprobe_conf" ]] || fail "the migration blacklists the competing driver"
@@ -169,3 +180,31 @@ run_migration || fail "the completed migration remains successful"
 [[ $(<"$rebuild_attempts") == 2 ]] || fail "the completed migration does not rebuild again"
 [[ ! -s $calls ]] || fail "the machine-wide completion marker avoids repeating the migration"
 pass "the machine-wide marker prevents redundant successful reruns"
+
+success_marker="$test_tmp/successful-migration"
+success_attempts="$test_tmp/successful-rebuild-attempts"
+printf '0\n' >"$success_attempts"
+: >"$calls"
+success_output=$(run_migration "$success_marker" "$success_attempts" 2>&1) ||
+  fail "the migration succeeds when bdc_pci unloads and facetimehd loads" "$success_output"
+[[ $(<"$success_attempts") == 1 ]] || fail "the successful path rebuilds the initramfs once"
+release_line=$(grep -nFx $'modprobe\t-r bdc_pci' "$calls" | cut -d: -f1)
+load_line=$(grep -nFx $'modprobe\tfacetimehd' "$calls" | cut -d: -f1)
+(( release_line < load_line )) || fail "the successful path unloads bdc_pci before loading facetimehd"
+[[ -f $success_marker ]] || fail "the successful immediate activation records completion"
+[[ $success_output != *"Could not"* ]] ||
+  fail "the successful immediate activation does not report a deferred load" "$success_output"
+pass "the successful unload path immediately attempts and loads facetimehd"
+
+fallback_marker="$test_tmp/deferred-module-load"
+fallback_attempts="$test_tmp/deferred-rebuild-attempts"
+printf '0\n' >"$fallback_attempts"
+: >"$calls"
+fallback_output=$(run_migration "$fallback_marker" "$fallback_attempts" 0 1 2>&1) ||
+  fail "a facetimehd load failure is deferred without failing migration" "$fallback_output"
+[[ $fallback_output == *"Could not load facetimehd now; it is configured to load after reboot."* ]] ||
+  fail "a failed facetimehd load reports the reboot fallback" "$fallback_output"
+[[ -f $fallback_marker ]] || fail "a deferred module load records migration completion"
+grep -Fq $'omarchy-state\tset reboot-required' "$calls" ||
+  fail "a deferred module load still requests a reboot"
+pass "a failed facetimehd load is reported and deferred until reboot"
